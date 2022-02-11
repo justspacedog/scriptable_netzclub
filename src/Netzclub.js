@@ -1,46 +1,10 @@
-// Variables used by Scriptable.
-// These must be at the very top of the file. Do not edit.
-// icon-color: pink; icon-glyph: broadcast-tower;
-// share-sheet-inputs: plain-text;
-
-
-
 /*****************
-Version 1.0.5
-
-Changelog:
-----------
-
-Version 1.0.5:
-	- Added alert to enter credetials and save it to the config file
-	- Search in iCloud for config and cache files
-	- Fixed percent representation to one decimal place
-
-Version 1.0.4:
-	- Parse data from new designed homepage.
-
-Version 1.0.3:
-	- Added possibility to store credentials also in an external config on the iCloud Drive which is not being touched by updates.
-	- Removed option to store credentials in the script itself.
-	- Always reload data when started within scriptable app.
-
-Version 1.0.2:
-	- Added possibility to use other drillisch companies.
-
-Version 1.0.1:
-	- Fixed reading total inclusive amount.
-	- Improved displaying of used amount.
-
-
-If you have problems or need help, please ask for support here:
-https://github.com/BergenSoft/scriptable_premiumsim
-
+The caching and display of data is completly based on this project: https://github.com/BergenSoft/scriptable_premiumsim in Version 1.0.5.
 
 credits:
+https://github.com/BergenSoft/scriptable_premiumsim
 https://github.com/chaeimg/battCircle/blob/main/battLevel.js
 */
-
-
 
 // ************************
 // * CUSTOM CONFIGURATION *
@@ -75,7 +39,8 @@ const m_Canvas = new DrawContext();
 const m_forceReload = false;
 
 // For processing the requests
-let m_Cookies = { "isCookieAllowed": "true" };
+let m_Cookies = { /*"isCookieAllowed": "true"*/ };
+let m_SecondCookies = {};
 let m_Sid = null;
 let m_Csrf_token = null;
 
@@ -112,7 +77,6 @@ if (!m_Filemanager.fileExists(m_ConfigFile))
 	alertBox.addCancelAction("Abbrechen");
 	alertBox.addTextField("Benutzername");
 	alertBox.addSecureTextField("Passwort");
-	alertBox.addTextField("Provider", "premiumsim.de");
 	let pressed = await alertBox.present();
 	
 	if (pressed === 0) // Save
@@ -120,8 +84,7 @@ if (!m_Filemanager.fileExists(m_ConfigFile))
 		const obj =
 		{
 			username: alertBox.textFieldValue(0),
-			password: alertBox.textFieldValue(1),
-			provider: alertBox.textFieldValue(2)
+			password: alertBox.textFieldValue(1)
 		};
 		m_Filemanager.writeString(m_ConfigFile, JSON.stringify(obj));
 		await m_Filemanager.downloadFileFromiCloud(m_ConfigFile);
@@ -145,16 +108,9 @@ if (config === null)
 	throw new Error("Failed to load configuration. Please delete or correct the file and run the script again.");
 }
 
-if (config.provider === null || config.provider === "")
-	config.provider = "premiumsim.de";
-
-// Use this to show the used credentials and provider
-// console.log(config);
-
 // Used URLS
-let m_LoginPageUrl = "https://service." + config.provider;
-let m_LoginUrl = "https://service." + config.provider + "/public/login_check";
-let m_DataUsageUrl = "https://service." + config.provider + "/mytariff/invoice/showGprsDataUsage";
+let m_LoginPageUrl = "https://www.netzclub.net/login"
+let m_DataUsageUrl = "https://www.netzclub.net/selfcare";
 
 try
 {
@@ -177,26 +133,48 @@ catch (e)
 await createWidget();
 Script.complete();
 
+async function prepareLoginData()
+{
+	// Get login page
+	let req;
+	req = new Request(m_LoginPageUrl);
+	req.method = 'GET';
+ 	req.headers = {
+ 		'Cookie': '',
+		'Host': 'www.netzclub.net',
+ 		'Connection': 'close'
+ 	};
+
+	var resp = await req.loadString();
+
+	appendCookies(req.response.cookies);
+
+	m_Csrf_token = getSubstring(resp, ['_csrf_token', 'value="'], "\"");
+	
+	console.log('CSRF-Token is');
+	console.log(m_Csrf_token);
+
+	// Get PHPSESSID
+	m_Sid = m_Cookies["PHPSESSID"];
+	
+	console.log('FIRST COOKIE is');
+	console.log(m_Cookies);
+}
 
 async function getDataUsage()
-{
+{	
 	// Post login data
-	let req = new Request(m_LoginUrl);
+	let req = new Request(m_LoginPageUrl);
 	req.method = 'POST';
 
 	req.headers = {
 		'Cookie': getCookiesString(),
-		'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:72.0) Gecko/20100101 Firefox/72.0',
-		'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-		'Content-Type': 'application/x-www-form-urlencoded',
-		'Origin': m_LoginPageUrl,
-		'Connection': 'keep-alive',
-		'Referer': m_LoginPageUrl,
-		'Upgrade-Insecure-Requests': '1',
-		'TE': 'Trailers'
+		'Host': 'www.netzclub.net',
+		'Content-type': 'application/x-www-form-urlencoded',
+ 		'Connection': 'keep-alive'
 	};
 
-	req.body = "_SID=" + m_Sid + "&UserLoginType%5Balias%5D=" + config.username + "&UserLoginType%5Bpassword%5D=" + config.password + "&UserLoginType%5Blogindata%5D=&UserLoginType%5Bcsrf_token%5D=" + m_Csrf_token;
+	req.body = "username=" + config.username + "&current-password=" + config.password + "&anchor=&_csrf_token=" + m_Csrf_token;
 
 	req.onRedirect = function (request)
 	{
@@ -204,85 +182,55 @@ async function getDataUsage()
 	}
 
 	var resp = await req.loadString();
-	appendCookies(req.response.cookies);
 
-	if (req.response.statusCode == 302 && req.response.headers["Location"] == "/start")
+	//appendSecondCookies
+	req.response.cookies.map(function (v)
+		{
+			m_SecondCookies[v.name] = v.value;
+			return null;
+		});
+	
+	console.log('SECOND COOKIE is');
+	console.log(m_SecondCookies);
+
+	if (req.response.statusCode == 302 && req.response.headers["Location"] == "/selfcare")
 	{
-		req = new Request(m_DataUsageUrl);
+  		let SecondCookieValues = Object.entries(m_SecondCookies).map(function (v)
+		{
+			return v[0] + "=" + v[1];
+		});
 
+		let SecondCookieString = SecondCookieValues.join('; ');
+  		
+		req = new Request(m_DataUsageUrl);
+		req.method = 'GET';
 		req.headers = {
-			'Cookie': getCookiesString(),
-			'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:72.0) Gecko/20100101 Firefox/72.0',
-			'Origin': m_LoginPageUrl,
-			'Connection': 'keep-alive',
-			'Referer': m_LoginPageUrl,
-			'Upgrade-Insecure-Requests': '1',
-			'TE': 'Trailers'
+			'Cookie': SecondCookieString,
+			'Host': "www.netzclub.net",
+			'Connection': 'close'
 		};
 		resp = await req.loadString();
 
-		let dataInclusive = getSubstring(resp, ['class="dataBlob inclusive"', 'Inklusives Datenvolumen'], '</div>').trim();
-		let dataUsageBytes = getSubstring(resp, ['class="dataBlob usage"', 'Inklusives Datenvolumen'], '</div>').trim();
+		let dataValues = getSubstring(resp, ['class="c-simple-progress"', '</progress>'], '</div>').trim().split(' von ');
+
+		let dataUsed = dataValues[1].replace(" MB", "") - dataValues[0].replace(" MB", "");
+		let dataInclusive = dataValues[1].replace(" MB", "");
 		
-		dataInclusive = dataInclusive.replace(",", ".").trim();
-		dataUsageBytes = dataUsageBytes.replace(",", ".").trim();
+		console.log('Data Values:');
+		console.log(dataValues);
 
-		if (dataInclusive.indexOf('GB') !== -1)
-			dataInclusive = parseInt(dataInclusive.substr(0, dataInclusive.length - 2));
-		else if (dataInclusive.indexOf('MB') !== -1)
-			dataInclusive = parseInt(dataInclusive.substr(0, dataInclusive.length - 2) / 1024);
-		else if (dataInclusive.indexOf('KB') !== -1)
-			dataInclusive = parseInt(dataInclusive.substr(0, dataInclusive.length - 2) / 1024 / 1024);
-		else if (dataInclusive.indexOf('B') !== -1)
-			dataInclusive = parseInt(dataInclusive.substr(0, dataInclusive.length - 1) / 1024 / 1024 / 1024);
+		let dataUsagePercent = Math.round(dataUsed / dataInclusive * 1000) / 10; 
 
-		if (dataUsageBytes.indexOf('GB') !== -1)
-			dataUsageBytes = parseFloat(dataUsageBytes.substr(0, dataUsageBytes.length - 2)) * 1024 * 1024 * 1024;
-		else if (dataUsageBytes.indexOf('MB') !== -1)
-			dataUsageBytes = parseFloat(dataUsageBytes.substr(0, dataUsageBytes.length - 2)) * 1024 * 1024;
-		else if (dataUsageBytes.indexOf('KB') !== -1)
-			dataUsageBytes = parseFloat(dataUsageBytes.substr(0, dataUsageBytes.length - 2)) * 1024;
-		else if (dataUsageBytes.indexOf('B') !== -1)
-			dataUsageBytes = parseFloat(dataUsageBytes.substr(0, dataUsageBytes.length - 1));
+		dataUsageBytes = parseInt(dataUsed);
 
-		let dataUsagePercent = Math.round(dataUsageBytes / (dataInclusive * 1024 * 1024 * 1024) * 1000) / 10; // round to 1 decimal place
-		dataUsageBytes = parseInt(dataUsageBytes);
-
-		m_Data.bytes = dataUsageBytes;
+		m_Data.bytes = dataUsed;
 		m_Data.percent = dataUsagePercent;
 		m_Data.total = dataInclusive;
 
-		console.log(m_Data.total + " GB");
-		console.log(dataUsageBytes);
+		console.log('Percentage Used:');
 		console.log(dataUsagePercent);
 		return;
 	}
-}
-
-async function prepareLoginData()
-{
-	// Get login page
-	let req;
-	req = new Request(m_LoginPageUrl);
-	req.method = 'GET';
-	req.headers = {
-		'Cookie': getCookiesString(),
-		'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:72.0) Gecko/20100101 Firefox/72.0',
-		'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-		'Content-Type': 'application/x-www-form-urlencoded',
-		'Connection': 'keep-alive',
-		'Upgrade-Insecure-Requests': '1',
-		'TE': 'Trailers'
-	};
-
-	var resp = await req.loadString();
-
-	appendCookies(req.response.cookies);
-
-	m_Csrf_token = getSubstring(resp, ['UserLoginType_csrf_token', 'value="'], "\"");
-
-	// Get sid
-	m_Sid = m_Cookies["_SID"];
 }
 
 function initFileManager()
@@ -402,18 +350,9 @@ async function createWidget()
 	m_Canvas.setTextAlignedCenter();
 	m_Canvas.setTextColor(new Color(m_CanvTextColor));
 	m_Canvas.setFont(Font.boldSystemFont(m_CanvTextSize));
-	if (m_Data.bytes < 100 * 1024 * 1024) // < 100 MB
-	{
-		m_Canvas.drawTextInRect(`${(m_Data.bytes / 1024 / 1024).toFixed(0)} MB / ${m_Data.total} GB`, canvTextRectBytes);
-	}
-	else if (m_Data.bytes < 1024 * 1024 * 1024) // < 1 GB
-	{
-		m_Canvas.drawTextInRect(`${(m_Data.bytes / 1024 / 1024 / 1024).toFixed(2)} GB / ${m_Data.total} GB`, canvTextRectBytes);
-	}
-	else
-	{
-		m_Canvas.drawTextInRect(`${(m_Data.bytes / 1024 / 1024 / 1024).toFixed(1)} GB / ${m_Data.total} GB`, canvTextRectBytes);
-	}
+	
+	m_Canvas.drawTextInRect(`${(m_Data.bytes).toFixed(0)} MB / ${m_Data.total} MB`, canvTextRectBytes);
+
 	m_Canvas.drawTextInRect(`${m_Data.percent} %`, canvTextRectPercent);
 
 	const canvImage = m_Canvas.getImage();
