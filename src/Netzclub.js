@@ -16,13 +16,13 @@ let m_CacheMinutes = 60 * 4;
 const m_CanvSize = 200;
 const m_CanvTextSize = 16;
 
-const m_CanvFillColorMonth = '#EDEDED';
+const m_CanvFillColorMonth = '#898989';
 const m_CanvFillColorDataGood = '#1AE01A';
 const m_CanvFillColorDataOK = '#E0E01A';
 const m_CanvFillColorDataBad = '#E01A1A';
-const m_CanvStrokeColor = '#121212'; // Circles background color
-const m_CanvBackColor = '#242424';   // Widget background color
-const m_CanvTextColor = '#FFFFFF';   // Text color (use same color as above to hide text)
+const m_CanvStrokeColor = '#D3D3D3'; // Circles background color
+//const m_CanvBackColor = '#242424';   // Widget background color
+//const m_CanvTextColor = '#FFFFFF';   // Text color (use same color as above to hide text)
 
 // Dimensions of the circles
 const m_CanvWidth = 9;
@@ -35,7 +35,14 @@ const m_CanvRadiusData = 70;
 // ********************
 
 // Used to draw the circles
-const m_Canvas = new DrawContext();
+let widget = new ListWidget()
+widget.setPadding(14, 14, 14, 14)
+
+let m_Canvas = new DrawContext();
+m_Canvas.opaque = false
+Script.setWidget(widget);
+Script.complete();
+
 const m_forceReload = false;
 
 // For processing the requests
@@ -51,10 +58,10 @@ let m_Data = {
 	total: 0
 };
 
-// Used for comparing caching date and to calculate month progress
-const m_Today = new Date();
-const m_MonthStart = new Date(m_Today.getFullYear(), m_Today.getMonth(), 1);
-const m_MonthEnd = new Date(m_Today.getFullYear(), m_Today.getMonth() + 1, 1);
+// Used for comparing caching date and to calculate month progress; Netzclub "bills" every 4 weeks
+const m_Today = new Date();;
+let m_LastDay = new Date(); // will be taken from the Netzclub websit
+let m_FirstDay = new Date(); // will be the m_LastDay minus 4 weekse
 
 // Set up the file manager.
 const m_Filemanager = initFileManager();
@@ -215,6 +222,13 @@ async function getDataUsage()
 
 		let dataUsed = dataValues[1].replace(" MB", "") - dataValues[0].replace(" MB", "");
 		let dataInclusive = dataValues[1].replace(" MB", "");
+
+		let dataDate = getSubstring(resp, ['<div class="u-info"', '>'], '</div>').trim().replace("bis ", "").split('.');
+		m_LastDay = new Date(dataDate[2] + '-' + dataDate[1] + '-' + dataDate[0]);
+		m_FirstDay = new Date(m_LastDay.getTime() - (60*60*24*4*7*1000));
+		
+		console.log('Billing Period:');
+		console.log(m_FirstDay + ' till ' + m_LastDay);
 		
 		console.log('Data Values:');
 		console.log(dataValues);
@@ -307,16 +321,15 @@ function loadDataFromCache()
 
 async function createWidget()
 {
-	const wig = new ListWidget();
 
 	m_Canvas.size = new Size(m_CanvSize, m_CanvSize);
 	m_Canvas.respectScreenScale = true;
 
-	let bgc = new Rect(0, 0, m_CanvSize, m_CanvSize);
-	m_Canvas.setFillColor(new Color(m_CanvBackColor));
-	m_Canvas.fill(bgc);
+	//let bgc = new Rect(0, 0, m_CanvSize, m_CanvSize);
+	//m_Canvas.setFillColor(Color.dynamic(Color.darkGray(), Color.lightGray()));
+	//m_Canvas.fill(bgc);
 
-	const percentMonth = (m_Today.getTime() - m_MonthStart.getTime()) / (m_MonthEnd.getTime() - m_MonthStart.getTime());
+	const percentMonth = (m_Today.getTime() - m_FirstDay.getTime()) / (m_LastDay.getTime() - m_FirstDay.getTime());
 	const fillColorData = (m_Data.percent / 100 <= percentMonth) ? m_CanvFillColorDataGood : ((m_Data.percent / 100 / 1.1 <= percentMonth) ? m_CanvFillColorDataOK : m_CanvFillColorDataBad);
 
 
@@ -347,19 +360,37 @@ async function createWidget()
 		m_CanvSize,
 		m_CanvTextSize * 2
 	);
-	m_Canvas.setTextAlignedCenter();
-	m_Canvas.setTextColor(new Color(m_CanvTextColor));
-	m_Canvas.setFont(Font.boldSystemFont(m_CanvTextSize));
+    
+    let stack = widget.addStack()
+	stack.centerAlignContent() 
+	stack.layoutVertically() 
 	
-	m_Canvas.drawTextInRect(`${(m_Data.bytes).toFixed(0)} MB / ${m_Data.total} MB`, canvTextRectBytes);
+	let dataStack = stack.addStack()
+	dataStack.layoutHorizontally()
+	dataStack.addSpacer()
 
-	m_Canvas.drawTextInRect(`${m_Data.percent} %`, canvTextRectPercent);
+    let dataText = dataStack.addText(`${(m_Data.bytes).toFixed(0)} / ${m_Data.total} MB`, canvTextRectBytes)
+    dataText.font = Font.semiboldRoundedSystemFont(13)
+    dataText.textColor = Color.dynamic(Color.black(), Color.white())
+    dataText.centerAlignText();
+	dataStack.addSpacer()
+
+	stack.addSpacer(3)
+
+	dataStack = stack.addStack()
+	dataStack.layoutHorizontally()
+	dataStack.addSpacer()
+
+	let percentageText = dataStack.addText(`${m_Data.percent} %`, canvTextRectPercent)
+    percentageText.font = Font.semiboldRoundedSystemFont(13)
+    percentageText.textColor = Color.dynamic(Color.black(), Color.white())
+	percentageText.centerAlignText()
+	dataStack.addSpacer()
 
 	const canvImage = m_Canvas.getImage();
-	wig.backgroundImage = canvImage;
-	Script.setWidget(wig);
-	Script.complete();
-	await wig.presentSmall();
+	widget.backgroundImage = canvImage;
+
+	await widget.presentSmall();
 }
 
 
