@@ -55,13 +55,12 @@ let m_Csrf_token = null;
 let m_Data = {
 	bytes: 0,
 	percent: 0,
-	total: 0
+	total: 0,
+	lastDay: 0,
 };
 
-// Used for comparing caching date and to calculate month progress; Netzclub "bills" every 4 weeks
-const m_Today = new Date();;
-let m_LastDay = new Date(); // will be taken from the Netzclub websit
-let m_FirstDay = new Date(); // will be the m_LastDay minus 4 weekse
+// Used for comparing caching date and to calculate month progress
+const m_Today = new Date();
 
 // Set up the file manager.
 const m_Filemanager = initFileManager();
@@ -75,34 +74,29 @@ const m_CacheDate = m_CacheExists ? m_Filemanager.modificationDate(m_CachePath) 
 
 // Set up config
 const m_ConfigFile = m_Filemanager.joinPath(m_ConfigRoot, "config.json");
-if (!m_Filemanager.fileExists(m_ConfigFile))
-{
+if (!m_Filemanager.fileExists(m_ConfigFile)) {
 	let alertBox = new Alert();
 	alertBox.title = "Zugangsdaten";
 	alertBox.message = "Bitte die Zugangsdaten eingeben.\nDie Daten werden standardmäßig in der iCloud abgespeichert.";
 	alertBox.addAction("Speichern");
 	alertBox.addCancelAction("Abbrechen");
-	alertBox.addTextField("Benutzername");
+	alertBox.addTextField("Mobilfunknummer oder E-Mail-Adresse");
 	alertBox.addSecureTextField("Passwort");
 	let pressed = await alertBox.present();
 	
-	if (pressed === 0) // Save
-	{
-		const obj =
-		{
+	if (pressed === 0) { // Save
+		const obj = {
 			username: alertBox.textFieldValue(0),
 			password: alertBox.textFieldValue(1)
 		};
 		m_Filemanager.writeString(m_ConfigFile, JSON.stringify(obj));
 		await m_Filemanager.downloadFileFromiCloud(m_ConfigFile);
 	}
-	else
-	{
+	else {
 		throw new Error("No configuration found");
 	}
 }
-else
-{
+else {
 	await m_Filemanager.downloadFileFromiCloud(m_ConfigFile);
 }
 
@@ -110,8 +104,7 @@ console.log("Config Path: " + m_ConfigFile);
 
 // Retrieve credentials
 const config = JSON.parse(await m_Filemanager.readString(m_ConfigFile));
-if (config === null)
-{
+if (config === null) {
 	throw new Error("Failed to load configuration. Please delete or correct the file and run the script again.");
 }
 
@@ -119,19 +112,16 @@ if (config === null)
 let m_LoginPageUrl = "https://www.netzclub.net/login"
 let m_DataUsageUrl = "https://www.netzclub.net/selfcare";
 
-try
-{
+try {
 	// Reload data if script is running within scriptable app
-	if (!config.runsInWidget || !m_CacheExists || (m_Today.getTime() - m_CacheDate.getTime()) > (m_CacheMinutes * 60 * 1000) || !loadDataFromCache())
-	{
+	if (!config.runsInWidget || !m_CacheExists || (m_Today.getTime() - m_CacheDate.getTime()) > (m_CacheMinutes * 60 * 1000) || !loadDataFromCache()) {
 		// Load from website
 		await prepareLoginData();
 		await getDataUsage();
 		saveDataToCache();
 	}
 }
-catch (e)
-{
+catch (e) {
 	console.error(e);
 	// Could not load from website, so load from cache
 	loadDataFromCache();
@@ -140,8 +130,7 @@ catch (e)
 await createWidget();
 Script.complete();
 
-async function prepareLoginData()
-{
+async function prepareLoginData() {
 	// Get login page
 	let req;
 	req = new Request(m_LoginPageUrl);
@@ -168,8 +157,7 @@ async function prepareLoginData()
 	console.log(m_Cookies);
 }
 
-async function getDataUsage()
-{	
+async function getDataUsage() {	
 	// Post login data
 	let req = new Request(m_LoginPageUrl);
 	req.method = 'POST';
@@ -183,16 +171,14 @@ async function getDataUsage()
 
 	req.body = "username=" + config.username + "&current-password=" + config.password + "&anchor=&_csrf_token=" + m_Csrf_token;
 
-	req.onRedirect = function (request)
-	{
+	req.onRedirect = function (request) {
 		return null;
 	}
 
 	var resp = await req.loadString();
 
 	//appendSecondCookies
-	req.response.cookies.map(function (v)
-		{
+	req.response.cookies.map(function (v) {
 			m_SecondCookies[v.name] = v.value;
 			return null;
 		});
@@ -200,10 +186,8 @@ async function getDataUsage()
 	console.log('SECOND COOKIE is');
 	console.log(m_SecondCookies);
 
-	if (req.response.statusCode == 302 && req.response.headers["Location"] == "/selfcare")
-	{
-  		let SecondCookieValues = Object.entries(m_SecondCookies).map(function (v)
-		{
+	if (req.response.statusCode == 302 && req.response.headers["Location"] == "/selfcare") {
+  		let SecondCookieValues = Object.entries(m_SecondCookies).map(function (v) {
 			return v[0] + "=" + v[1];
 		});
 
@@ -223,12 +207,10 @@ async function getDataUsage()
 		let dataUsed = dataValues[1].replace(" MB", "") - dataValues[0].replace(" MB", "");
 		let dataInclusive = dataValues[1].replace(" MB", "");
 
-		let dataDate = getSubstring(resp, ['<div class="u-info"', '>'], '</div>').trim().replace("bis ", "").split('.');
-		m_LastDay = new Date(dataDate[2] + '-' + dataDate[1] + '-' + dataDate[0]);
-		m_FirstDay = new Date(m_LastDay.getTime() - (60*60*24*4*7*1000));
+		let dataDate = getSubstring(resp, ['<div class="u-info"', '>'], '</div>').trim().replace("bis ", "");
 		
-		console.log('Billing Period:');
-		console.log(m_FirstDay + ' till ' + m_LastDay);
+		console.log('Billing till:');
+		console.log(dataDate);
 		
 		console.log('Data Values:');
 		console.log(dataValues);
@@ -240,6 +222,7 @@ async function getDataUsage()
 		m_Data.bytes = dataUsed;
 		m_Data.percent = dataUsagePercent;
 		m_Data.total = dataInclusive;
+		m_Data.lastDay = dataDate;
 
 		console.log('Percentage Used:');
 		console.log(dataUsagePercent);
@@ -247,8 +230,7 @@ async function getDataUsage()
 	}
 }
 
-function initFileManager()
-{
+function initFileManager() {
 	fileManager = FileManager.iCloud();
 	path = fileManager.joinPath(fileManager.documentsDirectory(), Script.name());
 	
@@ -258,10 +240,8 @@ function initFileManager()
 	return fileManager;
 }
 
-function getCookiesString()
-{
-	let CookieValues = Object.entries(m_Cookies).map(function (v)
-	{
+function getCookiesString() {
+	let CookieValues = Object.entries(m_Cookies).map(function (v) {
 		return v[0] + "=" + v[1];
 	});
 
@@ -270,68 +250,55 @@ function getCookiesString()
 	return result;
 }
 
-function appendCookies(newCookies)
-{
-	newCookies.map(function (v)
-	{
+function appendCookies(newCookies) {
+	newCookies.map(function (v) {
 		m_Cookies[v.name] = v.value;
 		return null;
 	});
 }
 
-function getSubstring(input, lookfor, lookUntil)
-{
-	lookfor.forEach(look =>
-	{
+function getSubstring(input, lookfor, lookUntil) {
+	lookfor.forEach(look => {
 		input = input.substr(input.indexOf(look) + look.length);
 	});
 
 	return input.substr(0, input.indexOf(lookUntil));
 }
 
-function saveDataToCache()
-{
-	try
-	{
+function saveDataToCache() {
+	try {
 		m_Filemanager.writeString(m_CachePath, JSON.stringify(m_Data))
 		return true;
 	}
-	catch (e)
-	{
+	catch (e) {
 		console.warn("Could not create the cache file.")
 		console.warn(e)
 		return false;
 	}
 }
 
-function loadDataFromCache()
-{
-	try
-	{
+function loadDataFromCache() {
+	try {
 		m_Data = JSON.parse(m_Filemanager.readString(m_CachePath));
 		return true;
 	}
-	catch (e)
-	{
+	catch (e) {
 		console.warn("Could not load the cache file.")
 		console.warn(e)
 		return false;
 	}
 }
 
-async function createWidget()
-{
-
+async function createWidget() {
 	m_Canvas.size = new Size(m_CanvSize, m_CanvSize);
 	m_Canvas.respectScreenScale = true;
 
-	//let bgc = new Rect(0, 0, m_CanvSize, m_CanvSize);
-	//m_Canvas.setFillColor(Color.dynamic(Color.darkGray(), Color.lightGray()));
-	//m_Canvas.fill(bgc);
+	dataDate = m_Data.lastDay.split('.');
+	const lastDay = new Date(dataDate[2] + '-' + dataDate[1] + '-' + dataDate[0]);
+	const firstDay = new Date(lastDay.getTime() - (60*60*24*4*7*1000)); // Netzclub "bills" every 4 weeks
 
-	const percentMonth = (m_Today.getTime() - m_FirstDay.getTime()) / (m_LastDay.getTime() - m_FirstDay.getTime());
+	const percentMonth = (m_Today.getTime() - firstDay.getTime()) / (lastDay.getTime() - firstDay.getTime());
 	const fillColorData = (m_Data.percent / 100 <= percentMonth) ? m_CanvFillColorDataGood : ((m_Data.percent / 100 / 1.1 <= percentMonth) ? m_CanvFillColorDataOK : m_CanvFillColorDataBad);
-
 
 	drawArc(
 		new Point(m_CanvSize / 2, m_CanvSize / 2),
@@ -347,19 +314,6 @@ async function createWidget()
 		m_Data.percent * 3.6,
 		fillColorData
 	);
-
-	const canvTextRectBytes = new Rect(
-		0,
-		m_CanvSize / 2 - m_CanvTextSize,
-		m_CanvSize,
-		m_CanvTextSize * 2
-	);
-	const canvTextRectPercent = new Rect(
-		0,
-		m_CanvSize / 2,
-		m_CanvSize,
-		m_CanvTextSize * 2
-	);
     
     let stack = widget.addStack()
 	stack.centerAlignContent() 
@@ -369,7 +323,7 @@ async function createWidget()
 	dataStack.layoutHorizontally()
 	dataStack.addSpacer()
 
-    let dataText = dataStack.addText(`${(m_Data.bytes).toFixed(0)} / ${m_Data.total} MB`, canvTextRectBytes)
+    let dataText = dataStack.addText(`${(m_Data.bytes).toFixed(0)} / ${m_Data.total} MB`)
     dataText.font = Font.semiboldRoundedSystemFont(13)
     dataText.textColor = Color.dynamic(Color.black(), Color.white())
     dataText.centerAlignText();
@@ -381,8 +335,8 @@ async function createWidget()
 	dataStack.layoutHorizontally()
 	dataStack.addSpacer()
 
-	let percentageText = dataStack.addText(`${m_Data.percent} %`, canvTextRectPercent)
-    percentageText.font = Font.semiboldRoundedSystemFont(13)
+	let percentageText = dataStack.addText(`${m_Data.percent} %`)
+    percentageText.font = Font.semiboldRoundedSystemFont(17)
     percentageText.textColor = Color.dynamic(Color.black(), Color.white())
 	percentageText.centerAlignText()
 	dataStack.addSpacer()
@@ -394,18 +348,15 @@ async function createWidget()
 }
 
 
-function sinDeg(deg)
-{
+function sinDeg(deg) {
 	return Math.sin((deg * Math.PI) / 180);
 }
 
-function cosDeg(deg)
-{
+function cosDeg(deg) {
 	return Math.cos((deg * Math.PI) / 180);
 }
 
-function drawArc(ctr, rad, w, deg, fillColor)
-{
+function drawArc(ctr, rad, w, deg, fillColor) {
 	let bgx = ctr.x - rad;
 	let bgy = ctr.y - rad;
 	let bgd = 2 * rad;
