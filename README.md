@@ -11,5 +11,5 @@ Preview:<br/>
 <img src="https://github.com/justspacedog/scriptable_netzclub/raw/main/dark.png" height="128" />
 
 
-On the first start, you should run the script from the scriptable app. You will be asked to enter the `username`, `password`.<br/>
+On the first start, you should run the script from the scriptable app. You will be asked to enter the `mobile number` (or `email address`) and `password`.<br/>
 The credentials are automatically saved to your iCloud Drive.
